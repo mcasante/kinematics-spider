@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+</style>
+<body>
+    <canvas></canvas>
+
+    <script>
+        const lerp = (v0, v1, t) => (1 - t) * v0 + t * v1
+
+        class Line {
+            constructor(point, len, i) {
+                this.a = new Point(point.x, point.y)
+                this.b = new Point()
+                this.angle = 0
+                this.len = len
+                this.calculateB()
+                this.i = i
+            }
+            
+            setA(point) {
+                this.a.set(point.x, point.y)
+            }
+            
+            setB(point) {
+                this.b.set(point.x, point.y)
+            }
+            
+            calculateB() {
+                let dx = this.len * Math.sin(this.angle);
+                let dy = this.len * Math.cos(this.angle)
+                this.b.set(this.a.x + dx, this.a.y + dy);
+            }
+            
+            follow(point) {
+                const p = Point.sub(point, this.a)
+                this.angle = p.heading()
+                p.setMag(this.len)
+                
+                p.mult(-1)
+                this.a = Point.add(point, p)
+            }
+            
+            draw(ctx) {
+                if(!ctx) return
+                ctx.beginPath();
+                
+                ctx.moveTo(this.a.x, this.a.y)
+                ctx.lineTo(this.b.x, this.b.y)
+                ctx.strokeStyle = `hsl(${this.i*3}, 100%, 50%)`
+                
+                ctx.closePath();
+                ctx.stroke();
+            }
+        }
+
+        class Point {
+            constructor(x, y) {
+                this.x = x
+                this.y = y
+            }
+            
+            set(x, y) {
+                this.x = x
+                this.y = y
+            }
+            
+            normalize() {
+                const len = this.mag();
+                if (len !== 0) this.mult(1 / len);
+                return this;
+            }
+            
+            mult(point) {
+                if(point instanceof Point) {
+                    this.set(this.x * point.x, this.y * point.y)
+                } else {
+                    this.set(this.x * point, this.y * point)
+                }
+                return this
+            }
+            
+            mag() {
+                const [x, y] = [ this.x, this.y ]
+                return Math.sqrt(x * x + y * y)
+            }
+            
+            setMag(n) {
+                this.normalize().mult(n)
+            }
+            
+            heading() {
+                return Math.atan2(this.x, this.y)
+            }
+            
+            static add(pointA, pointB) {
+                return new Point(pointA.x + pointB.x, pointA.y + pointB.y)
+            }
+
+            static sub(pointA, pointB) {
+                return new Point(pointA.x - pointB.x, pointA.y - pointB.y)
+            }
+            
+            static getDistance(pointA, pointB) { 
+                return Math.sqrt(
+                    Math.abs(
+                        (pointA.x - pointB.x) ** 2 + (pointA.y - pointB.y) ** 2
+                    )
+                )
+            }
+        }
+
+        class Tentacle {
+            constructor(size, base) {
+                this.size = size
+                this.base = base
+                this.tentacle = [new Line(new Point(200, 200), 2, 0)]
+                for(let i = 1; i < size; i++) {
+                    const next = new Line(this.tentacle[i-1].b, 2, i)
+                    this.tentacle.push(next)
+                }
+            }
+            
+            setBase(point) {
+                this.base = point
+            }
+            
+            update(mousePos) {
+                const total = this.tentacle.length
+                const lastOne = this.tentacle[this.size - 1]
+                lastOne.follow(mousePos)
+                lastOne.calculateB()
+                
+                for(let i = this.size - 2; i >= 0; i--) {
+                    this.tentacle[i].follow(this.tentacle[i+1].a)
+                    this.tentacle[i].calculateB()
+                }
+                
+                if(this.base) {
+                    this.updateBase()
+                }
+            }
+            
+            updateBase() {
+                this.tentacle[0].setA(this.base)
+                this.tentacle[0].calculateB()
+
+                for(let i = 1; i < this.size; i++) {
+                    this.tentacle[i].setA(this.tentacle[i-1].b)
+                    this.tentacle[i].calculateB()
+                }
+            }
+            
+            draw(ctx) {
+                for(let i = 0; i < this.size; i++) {
+                    this.tentacle[i].draw(ctx)
+                }
+            }
+        }
+
+        class Spot {
+            constructor(position) {
+                this.pos = position
+                this.dirX = 10
+                this.dirY = 10
+            }
+
+            update(canvas) {
+                const nextX = this.pos.x + this.dirX
+                const nextY = this.pos.y + this.dirY
+                this.dirX = nextX > canvas.width || nextX < 0 ? this.dirX * -1 : this.dirX
+                this.dirY = nextY > canvas.height || nextY < 0 ? this.dirY * -1 : this.dirY
+
+                const movement = new Point(this.dirX, this.dirY)
+                this.pos = Point.add(this.pos, movement)
+            }
+
+            follow(point) {
+                const lerpX = lerp(this.pos.x, point.x, .05)
+                const lerpY = lerp(this.pos.y, point.y, .05)
+                this.pos.set(lerpX, lerpY)
+            }
+
+            draw(ctx) {
+                ctx.beginPath()
+                ctx.arc(this.pos.x, this.pos.y, 20, 0, Math.PI * 2, false)
+                ctx.stroke()
+            }
+        }
+
+        window.addEventListener('load', () => {
+            const canvas = document.querySelector('canvas')
+            const ctx = canvas.getContext('2d')
+            
+            let bases = Array.from({ length: 8 }, () => new Point(0, 0))
+        
+            const setSize = () => {
+                canvas.width = window.innerWidth
+                canvas.height = window.innerHeight - 50
+                bases.forEach(base => base.set(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height
+                ))
+            }
+            setSize()
+            window.addEventListener('resize', setSize)
+            
+            const mousePos = new Point(20, 20)
+            
+            window.addEventListener('mousemove', (e) => {
+                mousePos.set(e.clientX, e.clientY)
+            })
+            
+            window.addEventListener('touchmove', (e) => {
+                mousePos.set(e.touches[0].clientX, e.touches[0].clientY)
+            })
+
+            const segments = 127
+            
+            const getTentacles = (bases) => bases
+                .map(base => new Tentacle(segments, base))
+            
+            let tentacles = getTentacles(bases)
+            
+            const intentionPoints = bases.map(b => new Point(b.x, b.y))
+
+            const spot = new Spot(new Point(0, 0))
+
+            const desiredSpot = new Point(Math.random() * canvas.width, Math.random() * canvas.height)
+
+            canvas.addEventListener('click', () => {
+                desiredSpot.set(mousePos.x, mousePos.y)
+            })
+
+            const loop = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+                ctx.beginPath()
+                ctx.arc(desiredSpot.x, desiredSpot.y, 5, 0, Math.PI * 2, false)
+                ctx.fill()
+                
+                const goalD = Point.getDistance(desiredSpot, spot.pos)
+                // console.log(goalD)
+                if(goalD < 20) {
+                    desiredSpot.set(Math.random() * canvas.width, Math.random() * canvas.height)
+                } else {
+                    spot.follow(desiredSpot)
+                    spot.draw(ctx)
+                }
+                
+                // spot.update(canvas)
+
+
+                const mousePos = spot.pos
+                
+                for(let i = 0; i < tentacles.length; i++) {
+                    const t = tentacles[i]
+                    const ip = intentionPoints[i]
+
+                    t.update(mousePos)
+
+                    
+                    if(Point.getDistance(t.base, ip) > 20) {
+                        const speed = .25
+                        const x = lerp(t.base.x, ip.x, speed)
+                        const y = lerp(t.base.y, ip.y, speed)
+                        
+                        t.setBase(new Point(x, y))
+                    }
+                    
+                    const d = Point.getDistance(mousePos, t.base)
+
+                    if(d > segments * 2) {
+                        const p = Point.sub(t.base, mousePos)
+                        
+                        p.setMag(segments * 4)
+                        p.mult(-1)
+
+                        const newP = Point.add(t.base, p)
+                        
+                        ip.set(newP.x, newP.y)
+                        t.updateBase()
+                    }
+
+                    t.draw(ctx) 
+                }
+                requestAnimationFrame(loop)
+            }
+            
+            loop()
+            
+        })
+    </script>
+</body>
+</html>
